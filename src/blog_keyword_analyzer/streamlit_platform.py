@@ -785,6 +785,8 @@ def main():  # override with extended UI
             st.session_state["prev_google"] = google_only
         except Exception:
             pass
+from .streamlit_api_only import main as _api_main  # override to API-only UI
+main = _api_main
 
 if __name__ == "__main__":  # pragma: no cover
     main()

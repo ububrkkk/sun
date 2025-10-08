@@ -88,6 +88,29 @@ class NaverAdsEnricher:
             return None, None, None
         return None, None, None
 
+    def related_keywords(self, hint_keyword: str, show_detail: int = 1, max_rows: int = 2000) -> list[dict]:
+        """Return related keywords with stats from Naver SearchAd keywordstool.
+
+        Parameters:
+        - hint_keyword: base keyword to expand
+        - show_detail: include detailed stats (1 or 0)
+        - max_rows: limit the number of returned rows
+        """
+        path = "/keywordstool"
+        url = f"{self.BASE_URL}{path}"
+        try:
+            http = HttpClient(headers=self._headers("GET", path))
+            data = http.get_json(url, params={"hintKeywords": hint_keyword, "showDetail": int(show_detail)})
+            lst = data.get("keywordList") if isinstance(data, dict) else None
+            if isinstance(lst, list):
+                rows = [x for x in lst if isinstance(x, dict)]
+                if isinstance(max_rows, int) and max_rows > 0:
+                    rows = rows[:max_rows]
+                return rows
+        except Exception:
+            return []
+        return []
+
 
 def build_enrichers_from_env() -> Dict[str, object]:
     enrichers: Dict[str, object] = {}
