@@ -57,34 +57,38 @@ def _google_cse_search(api_key: str, cx: str, q: str, num: int = 10) -> List[Dic
 def main() -> None:
     load_env()
     st.set_page_config(page_title="Naver Keyword Monetizer", layout="wide")
-    st.title("Naver Keyword Monetizer (API)")
+    st.title("네이버 키워드 수익 분석 (API)")
 
     with st.sidebar:
-        st.header("Settings")
-        seed = st.text_input("Seed keyword", value="포항 맛집", key="seed_input")
-        max_items = st.slider("Max suggestions (SearchAd)", 10, 1000, 200, 10)
-        st.subheader("Filters")
-        min_total_vol = st.number_input("Min volume (PC+MO)", 0, 1_000_000, 0, 50)
-        min_clicks = st.number_input("Min avg clicks (sum)", 0, 1_000_000, 0, 10)
-        min_cpc = st.number_input("Min CPC (KRW)", 0, 1_000_000, 0, 10)
-        sort_by = st.selectbox(
-            "Sort by",
-            ("est_revenue", "plAvgCpc", "sum_clicks", "sum_volume", "compIdx"),
+        st.header("설정")
+        seed = st.text_input("시드 키워드", value="포항 맛집", key="seed_input")
+        max_items = st.slider("최대 추천 수(SearchAd)", 10, 1000, 200, 10)
+        st.subheader("필터")
+        min_total_vol = st.number_input("최소 검색량 합(PC+MO)", 0, 1_000_000, 0, 50)
+        min_clicks = st.number_input("최소 평균 클릭수 합", 0, 1_000_000, 0, 10)
+        min_cpc = st.number_input("최소 CPC(원)", 0, 1_000_000, 0, 10)
+        exclude_text = st.text_input(
+            "제외 키워드(쉼표)",
+            value="가격, 원, 비용, 최저가, 할인, 쿠폰, 무료, 유료, 시세, 견적",
+        )
+        sort_choice = st.selectbox(
+            "정렬 기준",
+            ("예상 수익", "클릭 합계", "검색량 합계", "경쟁 지수"),
             index=0,
         )
-        descending = st.checkbox("Sort descending", value=True)
-        display_top = st.slider("Display Top N", 10, 1000, 200, 10)
-        st.caption("Required: NAVER_AD_*; Optional: GOOGLE_*")
-        auto_run = st.checkbox("Auto-run on seed change", value=True)
-        refresh = st.button("Refresh")
-        run = st.button("Run")
+        descending = st.checkbox("내림차순 정렬", value=True)
+        display_top = st.slider("표시 Top N", 10, 1000, 200, 10)
+        st.caption("필수: NAVER_AD_*; 선택: GOOGLE_*")
+        auto_run = st.checkbox("시드 변경 시 자동 실행", value=True)
+        refresh = st.button("새로고침")
+        run = st.button("실행")
 
     enrichers = build_enrichers_from_env()
     ok_ads = "naver_ads" in enrichers
     ok_cse = "google_cse" in enrichers
     cols = st.columns(2)
-    cols[0].metric("SearchAd Key", "OK" if ok_ads else "Missing")
-    cols[1].metric("Google CSE Key", "OK" if ok_cse else "Missing")
+    cols[0].metric("SearchAd 키", "OK" if ok_ads else "없음")
+    cols[1].metric("Google CSE 키", "OK" if ok_cse else "없음")
     if not ok_ads:
         st.error("NAVER_AD_* keys are required. Set them in Secrets or .env.")
         return
@@ -177,7 +181,7 @@ def main() -> None:
                         seen2[rk] = it
             rel = list(seen2.values())
             if not rel:
-                st.info("No related keywords from API. Try a simpler seed.")
+                st.info("API에서 연관 키워드를 찾지 못했습니다. 더 단순한 시드를 사용해보세요.")
                 st.stop()
 
     # Build rows
@@ -205,6 +209,11 @@ def main() -> None:
             }
         )
 
+    # 가격/비용 관련 키워드 제외
+    exclude_set = {t.strip() for t in exclude_text.split(',') if t.strip()}
+    if exclude_set:
+        money_rows = [r for r in money_rows if not any(tok in r.get("relKeyword", "") for tok in exclude_set)]
+
     # Preserve original for Top tab
     orig_rows = list(money_rows)
 
@@ -218,13 +227,13 @@ def main() -> None:
     ]
     money_rows = filtered or money_rows
 
-    tabs = st.tabs(["Monetization", "Related (API)", "Google CSE", "Top Searches"]) 
+    tabs = st.tabs(["수익 분석", "연관 키워드", "Google CSE", "인기 검색"]) 
 
     with tabs[0]:
-        st.subheader("API-based metrics + revenue estimate")
+        st.subheader("API 지표 + 수익 추정")
         total_rev = sum(int(r.get("est_revenue", 0)) for r in money_rows)
-        st.metric("Rows", len(money_rows))
-        st.metric("Sum(est revenue)", f"{total_rev:,} KRW")
+        st.metric("표시 행 수", len(money_rows))
+        st.metric("예상 수익 합계", f"{total_rev:,}원")
         show_cols = [
             "relKeyword",
             "sum_volume",
@@ -233,37 +242,36 @@ def main() -> None:
             "sum_clicks",
             "monthlyAvePcClkCnt",
             "monthlyAveMobileClkCnt",
-            "plAvgCpc",
             "est_revenue",
         ]
 
+        sort_map = {
+            "예상 수익": "est_revenue",
+            "클릭 합계": "sum_clicks",
+            "검색량 합계": "sum_volume",
+            "경쟁 지수": "compIdx",
+        }
+        sort_key = sort_map.get(sort_choice, "est_revenue")
+
         def _sort_key(row: Dict[str, Any]):
-            if sort_by == "est_revenue":
-                return (row.get("est_revenue", 0), row.get("plAvgCpc", 0))
-            if sort_by == "plAvgCpc":
-                return (row.get("plAvgCpc", 0), row.get("est_revenue", 0))
-            if sort_by == "sum_clicks":
-                return (row.get("sum_clicks", 0), row.get("est_revenue", 0))
-            if sort_by == "sum_volume":
-                return (row.get("sum_volume", 0), row.get("est_revenue", 0))
-            if sort_by == "compIdx":
-                return (float(row.get("compIdx", 0.0) or 0.0), row.get("est_revenue", 0))
-            return (row.get("est_revenue", 0), row.get("plAvgCpc", 0))
+            primary = row.get(sort_key, 0)
+            secondary = row.get("sum_clicks", 0)
+            return (primary, secondary)
 
         view = sorted(money_rows, key=_sort_key, reverse=bool(descending))[: int(display_top)]
         st.dataframe([{k: r.get(k) for k in show_cols} for r in view], use_container_width=True)
         st.download_button(
-            "Download CSV (Monetization)",
+            "CSV 다운로드(수익 분석)",
             data=_to_csv_bytes([{k: r.get(k) for k in show_cols} for r in view]),
             file_name="monetization.csv",
             mime="text/csv",
         )
-        with st.expander("Debug (first row)"):
+        with st.expander("디버그(첫 행)"):
             if money_rows:
                 st.json(money_rows[0])
 
     with tabs[1]:
-        st.subheader("SearchAd related keywords (trimmed)")
+        st.subheader("SearchAd 연관 키워드(일부)")
         keep = [
             "relKeyword",
             "monthlyPcQcCnt",
@@ -274,38 +282,37 @@ def main() -> None:
             "compIdx",
         ]
         trimmed = [{k: it.get(k) for k in keep if k in it} for it in rel]
-        page_size = st.slider("Page size", 10, 200, 50, 10)
-        page = st.number_input("Page", min_value=1, value=1, step=1)
+        page_size = st.slider("페이지 크기", 10, 200, 50, 10)
+        page = st.number_input("페이지", min_value=1, value=1, step=1)
         start = (int(page) - 1) * int(page_size)
         end = start + int(page_size)
         st.dataframe(trimmed[start:end], use_container_width=True)
 
     with tabs[2]:
-        st.subheader("Google CSE results")
+        st.subheader("Google CSE 결과")
         g_api = os.getenv("GOOGLE_API_KEY", "")
         g_cx = os.getenv("GOOGLE_CSE_CX", "")
-        kw_g = st.text_input("Query", value=seed, key="g_kw")
-        num_g = st.slider("Results", 1, 10, 10, 1)
+        kw_g = st.text_input("검색어", value=seed, key="g_kw")
+        num_g = st.slider("결과 수", 1, 10, 10, 1)
         if not g_api or not g_cx:
-            st.info("Requires GOOGLE_API_KEY / GOOGLE_CSE_CX")
+            st.info("GOOGLE_API_KEY / GOOGLE_CSE_CX가 필요합니다.")
         else:
-            if st.button("Search (CSE)"):
+            if st.button("CSE 조회"):
                 items = _google_cse_search(g_api, g_cx, kw_g, num=num_g)
                 st.dataframe(items or [], use_container_width=True)
 
     with tabs[3]:
-        st.subheader("Top searches (from API)")
+        st.subheader("인기 검색 (API 기반)")
         rows_tot = list(orig_rows)
         top_vol = sorted(rows_tot, key=lambda x: x.get("sum_volume", 0), reverse=True)[:20]
         top_clk = sorted(rows_tot, key=lambda x: x.get("sum_clicks", 0), reverse=True)[:20]
-        st.markdown("**Top 20 by volume (PC+MO)**")
+        st.markdown("**검색량 Top 20 (PC+MO)**")
         st.dataframe([
-            {k: r.get(k) for k in ["relKeyword", "sum_volume", "monthlyPcQcCnt", "monthlyMobileQcCnt", "plAvgCpc"]}
+            {k: r.get(k) for k in ["relKeyword", "sum_volume", "monthlyPcQcCnt", "monthlyMobileQcCnt"]}
             for r in top_vol
         ], use_container_width=True)
-        st.markdown("**Top 20 by clicks (PC+MO)**")
+        st.markdown("**클릭수 Top 20 (PC+MO)**")
         st.dataframe([
-            {k: r.get(k) for k in ["relKeyword", "sum_clicks", "monthlyAvePcClkCnt", "monthlyAveMobileClkCnt", "plAvgCpc"]}
+            {k: r.get(k) for k in ["relKeyword", "sum_clicks", "monthlyAvePcClkCnt", "monthlyAveMobileClkCnt"]}
             for r in top_clk
         ], use_container_width=True)
-
