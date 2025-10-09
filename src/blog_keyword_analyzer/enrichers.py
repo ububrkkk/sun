@@ -58,7 +58,7 @@ class GoogleCSEnricher:
 class NaverAdsEnricher:
     BASE_URL = "https://api.searchad.naver.com"
 
-    def __init__(self, customer_id: string, api_key: string, secret_key: string) -> None:  # type: ignore[name-defined]
+    def __init__(self, customer_id: str, api_key: str, secret_key: str) -> None:
         self.customer_id = customer_id
         self.api_key = api_key
         self.secret_key = secret_key
@@ -66,7 +66,14 @@ class NaverAdsEnricher:
     def _headers(self, method: str, path: str) -> Dict[str, str]:
         ts = str(int(time.time() * 1000))
         sig = base64.b64encode(hmac.new(self.secret_key.encode(), f"{ts}.{method}.{path}".encode(), hashlib.sha256).digest()).decode()
-        return {"X-Timestamp": ts, "X-API-KEY": self.api_key, "X-Customer": self.customer_id, "X-Signature": sig}
+        return {
+            "X-Timestamp": ts,
+            "X-API-KEY": self.api_key,
+            "X-Customer": self.customer_id,
+            "X-Signature": sig,
+            "Accept": "application/json",
+            "Content-Type": "application/json; charset=UTF-8",
+        }
 
     def keyword_stats(self, keyword: str) -> tuple[Optional[int], Optional[int], Optional[float]]:
         path = "/keywordstool"
@@ -100,7 +107,8 @@ class NaverAdsEnricher:
         url = f"{self.BASE_URL}{path}"
         try:
             http = HttpClient(headers=self._headers("GET", path))
-            data = http.get_json(url, params={"hintKeywords": hint_keyword, "showDetail": int(show_detail)})
+            params = {"hintKeywords": hint_keyword, "showDetail": int(show_detail), "includeHintKeywords": 1}
+            data = http.get_json(url, params=params)
             lst = data.get("keywordList") if isinstance(data, dict) else None
             if isinstance(lst, list):
                 rows = [x for x in lst if isinstance(x, dict)]

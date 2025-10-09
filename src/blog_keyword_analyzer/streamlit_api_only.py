@@ -106,7 +106,40 @@ def main() -> None:
 
     @st.cache_data(show_spinner=False, ttl=60)
     def _fetch_related_cached(seed_key: str, limit: int) -> List[Dict[str, Any]]:
-        return ads.related_keywords(seed_key, show_detail=1, max_rows=int(limit))  # type: ignore[attr-defined]
+        """Fetch related keywords with simple fallbacks.
+
+        1) Try the full seed as-is.
+        2) If empty and seed has spaces, try each token and merge results.
+        3) If still empty and contains spaces, try seed without spaces.
+        """
+        try:
+            rows = ads.related_keywords(seed_key, show_detail=1, max_rows=int(limit))  # type: ignore[attr-defined]
+        except Exception:
+            rows = []
+        if rows:
+            return rows
+        toks = [t for t in seed_key.split(" ") if t]
+        seen: dict[str, Dict[str, Any]] = {}
+        if len(toks) >= 2:
+            for t in toks:
+                try:
+                    sub = ads.related_keywords(t, show_detail=1, max_rows=int(limit))  # type: ignore[attr-defined]
+                except Exception:
+                    sub = []
+                for it in sub or []:
+                    k = str(it.get("relKeyword", "")).strip()
+                    if k and k not in seen:
+                        seen[k] = it
+            if seen:
+                return list(seen.values())[: int(limit)]
+            no_space = seed_key.replace(" ", "")
+            try:
+                rows2 = ads.related_keywords(no_space, show_detail=1, max_rows=int(limit))  # type: ignore[attr-defined]
+                if rows2:
+                    return rows2
+            except Exception:
+                pass
+        return []
 
     with st.spinner("SearchAd 연관 키워드 수집 중..."):
         try:
@@ -118,7 +151,7 @@ def main() -> None:
             st.error("SearchAd 응답 형식이 올바르지 않습니다.")
             st.stop()
         if not rel:
-            st.info("연관 키워드를 찾지 못했습니다.")
+            st.info("연관 키워드를 찾지 못했습니다. 시드를 더 일반적인 단어로 바꾸거나 공백을 줄여보세요.")
             st.stop()
 
     money_rows: List[Dict[str, Any]] = []
