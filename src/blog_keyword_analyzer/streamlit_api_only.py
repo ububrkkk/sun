@@ -6,9 +6,16 @@ from typing import Any, Dict, List
 import requests
 import streamlit as st
 
-from .env import load_env
-from .enrichers import build_enrichers_from_env
-from .text_utils import normalize_query
+from blog_keyword_analyzer.env import load_env
+from blog_keyword_analyzer.enrichers import build_enrichers_from_env
+from blog_keyword_analyzer.text_utils import normalize_query
+
+
+def _ival(x: Any) -> int:
+    try:
+        return int(float(str(x).replace(",", "")))
+    except Exception:
+        return 0
 
 
 def _to_csv_bytes(rows: List[dict]) -> bytes:
@@ -56,11 +63,20 @@ def main() -> None:
         st.header("설정")
         seed = st.text_input("시드 키워드", value="봄 여행")
         max_items = st.slider("최대 추천 수(SearchAd)", 10, 1000, 200, 10)
+        st.subheader("필터")
+        min_total_vol = st.number_input("최소 검색량(PC+MO)", 0, 1_000_000, 0, 50)
+        min_clicks = st.number_input("최소 평균 클릭수(합)", 0, 1_000_000, 0, 10)
+        min_cpc = st.number_input("최소 CPC(원)", 0, 1_000_000, 0, 10)
         st.caption("필수: NAVER_AD_*, 선택: GOOGLE_*")
         run = st.button("실행")
 
     enrichers = build_enrichers_from_env()
-    if "naver_ads" not in enrichers:
+    ok_ads = "naver_ads" in enrichers
+    ok_cse = "google_cse" in enrichers
+    cols = st.columns(2)
+    cols[0].metric("SearchAd 키", "OK" if ok_ads else "없음")
+    cols[1].metric("Google CSE 키", "OK" if ok_cse else "없음")
+    if not ok_ads:
         st.error("NAVER_AD_* 키가 필요합니다. .env 또는 Secrets에 설정하세요.")
         return
 
@@ -75,21 +91,17 @@ def main() -> None:
 
     ads = enrichers["naver_ads"]  # type: ignore[index]
     with st.spinner("SearchAd 연관 키워드 수집 중..."):
-        rel = []
         try:
             rel = ads.related_keywords(seed, show_detail=1, max_rows=int(max_items))  # type: ignore[attr-defined]
         except Exception as e:  # noqa: BLE001
             st.error(f"SearchAd 연동 오류: {e}")
-            return
+            st.stop()
+        if not isinstance(rel, list):
+            st.error("SearchAd 응답 형식이 올바르지 않습니다.")
+            st.stop()
         if not rel:
             st.info("연관 키워드를 찾지 못했습니다.")
-            return
-
-    def _ival(x):
-        try:
-            return int(float(str(x).replace(",", "")))
-        except Exception:
-            return 0
+            st.stop()
 
     money_rows: List[Dict[str, Any]] = []
     for it in rel:
@@ -100,15 +112,32 @@ def main() -> None:
         mo_clk = _ival(it.get("monthlyAveMobileClkCnt"))
         cpc = float(it.get("plAvgCpc") or 0.0)
         revenue = int((pc_clk + mo_clk) * cpc)
-        money_rows.append({
-            "relKeyword": kw,
-            "monthlyPcQcCnt": pc,
-            "monthlyMobileQcCnt": mo,
-            "monthlyAvePcClkCnt": pc_clk,
-            "monthlyAveMobileClkCnt": mo_clk,
-            "plAvgCpc": cpc,
-            "예상_수익(원)": revenue,
-        })
+        money_rows.append(
+            {
+                "relKeyword": kw,
+                "monthlyPcQcCnt": pc,
+                "monthlyMobileQcCnt": mo,
+                "monthlyAvePcClkCnt": pc_clk,
+                "monthlyAveMobileClkCnt": mo_clk,
+                "plAvgCpc": cpc,
+                "예상_수익(원)": revenue,
+            }
+        )
+
+    # 필터 적용
+    def _tot_vol(r: Dict[str, Any]) -> int:
+        return int(r.get("monthlyPcQcCnt", 0)) + int(r.get("monthlyMobileQcCnt", 0))
+
+    def _tot_clk(r: Dict[str, Any]) -> int:
+        return int(r.get("monthlyAvePcClkCnt", 0)) + int(r.get("monthlyAveMobileClkCnt", 0))
+
+    money_rows = [
+        r
+        for r in money_rows
+        if _tot_vol(r) >= int(min_total_vol)
+        and _tot_clk(r) >= int(min_clicks)
+        and float(r.get("plAvgCpc", 0.0)) >= float(min_cpc)
+    ]
 
     tabs = st.tabs([
         "수익 분석(SearchAd)",
@@ -118,7 +147,7 @@ def main() -> None:
 
     with tabs[0]:
         st.subheader("API 기반 지표 + 수익 추정")
-        total_rev = sum(r["예상_수익(원)"] for r in money_rows)
+        total_rev = sum(int(r.get("예상_수익(원)", 0)) for r in money_rows)
         st.metric("표시 키워드 수", len(money_rows))
         st.metric("예상 수익 합(단순)", f"{total_rev:,}원")
         show_cols = [
@@ -165,4 +194,3 @@ def main() -> None:
             if st.button("CSE 조회"):
                 items = _google_cse_search(g_api, g_cx, kw_g, num=num_g)
                 st.dataframe(items or [], use_container_width=True)
-
