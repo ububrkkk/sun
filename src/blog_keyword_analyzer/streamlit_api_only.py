@@ -67,6 +67,19 @@ def main() -> None:
         min_total_vol = st.number_input("최소 검색량(PC+MO)", 0, 1_000_000, 0, 50)
         min_clicks = st.number_input("최소 평균 클릭수(합)", 0, 1_000_000, 0, 10)
         min_cpc = st.number_input("최소 CPC(원)", 0, 1_000_000, 0, 10)
+        sort_by = st.selectbox(
+            "정렬 기준",
+            (
+                "예상_수익(원)",
+                "plAvgCpc",
+                "monthlyAvePcClkCnt+monthlyAveMobileClkCnt",
+                "monthlyPcQcCnt+monthlyMobileQcCnt",
+                "compIdx",
+            ),
+            index=0,
+        )
+        descending = st.checkbox("내림차순 정렬", value=True)
+        display_top = st.slider("표시 Top N", 10, 1000, 200, 10)
         st.caption("필수: NAVER_AD_*, 선택: GOOGLE_*")
         run = st.button("실행")
 
@@ -90,9 +103,14 @@ def main() -> None:
         return
 
     ads = enrichers["naver_ads"]  # type: ignore[index]
+
+    @st.cache_data(show_spinner=False, ttl=60)
+    def _fetch_related_cached(seed_key: str, limit: int) -> List[Dict[str, Any]]:
+        return ads.related_keywords(seed_key, show_detail=1, max_rows=int(limit))  # type: ignore[attr-defined]
+
     with st.spinner("SearchAd 연관 키워드 수집 중..."):
         try:
-            rel = ads.related_keywords(seed, show_detail=1, max_rows=int(max_items))  # type: ignore[attr-defined]
+            rel = _fetch_related_cached(seed, int(max_items))
         except Exception as e:  # noqa: BLE001
             st.error(f"SearchAd 연동 오류: {e}")
             st.stop()
@@ -159,7 +177,26 @@ def main() -> None:
             "plAvgCpc",
             "예상_수익(원)",
         ]
-        view = sorted(money_rows, key=lambda x: (x["예상_수익(원)"], x["plAvgCpc"]), reverse=True)
+        def _sort_key(row: Dict[str, Any]):
+            if sort_by == "예상_수익(원)":
+                return (row.get("예상_수익(원)", 0), row.get("plAvgCpc", 0))
+            if sort_by == "plAvgCpc":
+                return (row.get("plAvgCpc", 0), row.get("예상_수익(원)", 0))
+            if sort_by == "monthlyAvePcClkCnt+monthlyAveMobileClkCnt":
+                return (
+                    _tot_clk(row),
+                    row.get("예상_수익(원)", 0),
+                )
+            if sort_by == "monthlyPcQcCnt+monthlyMobileQcCnt":
+                return (
+                    _tot_vol(row),
+                    row.get("예상_수익(원)", 0),
+                )
+            if sort_by == "compIdx":
+                return (float(row.get("compIdx", 0.0)), row.get("예상_수익(원)", 0))
+            return (row.get("예상_수익(원)", 0), row.get("plAvgCpc", 0))
+
+        view = sorted(money_rows, key=_sort_key, reverse=bool(descending))[: int(display_top)]
         st.dataframe([{k: r.get(k) for k in show_cols} for r in view], use_container_width=True)
         st.download_button(
             "CSV 다운로드(수익 분석)",
@@ -167,6 +204,9 @@ def main() -> None:
             file_name="monetization.csv",
             mime="text/csv",
         )
+        with st.expander("디버그(첫 행 원본)"):
+            if money_rows:
+                st.json(money_rows[0])
 
     with tabs[1]:
         st.subheader("SearchAd 연관 키워드(원본 일부)")
@@ -180,7 +220,12 @@ def main() -> None:
             "compIdx",
         ]
         trimmed = [{k: it.get(k) for k in keep if k in it} for it in rel]
-        st.dataframe(trimmed, use_container_width=True)
+        # 페이지네이션(간단)
+        page_size = st.slider("페이지 크기", 10, 200, 50, 10)
+        page = st.number_input("페이지", min_value=1, value=1, step=1)
+        start = (int(page) - 1) * int(page_size)
+        end = start + int(page_size)
+        st.dataframe(trimmed[start:end], use_container_width=True)
 
     with tabs[2]:
         st.subheader("Google CSE 결과")
