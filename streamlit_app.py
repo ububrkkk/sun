@@ -23,12 +23,12 @@ def _ensure_src_on_path() -> None:
         sys.path.insert(0, src)
 
 
-def _load_app_main_via_spec() -> Callable[[], int | None]:
+def _load_app_main_via_spec(mod_basename: str) -> Callable[[], int | None]:
     src = _src_dir()
     pkg_name = "blog_keyword_analyzer"
-    mod_name = f"{pkg_name}.streamlit_api_only"
+    mod_name = f"{pkg_name}.{mod_basename}"
     pkg_path = os.path.join(src, pkg_name)
-    file_path = os.path.join(pkg_path, "streamlit_api_only.py")
+    file_path = os.path.join(pkg_path, f"{mod_basename}.py")
 
     if pkg_name not in sys.modules:
         pkg = types.ModuleType(pkg_name)
@@ -50,10 +50,21 @@ def _load_app_main_via_spec() -> Callable[[], int | None]:
 
 _ensure_src_on_path()
 
+mode = os.getenv("APP_MODE", "monetization").strip().lower()
+target = {
+    "monetization": "streamlit_monetization",
+    "platform": "streamlit_platform",
+    "api": "streamlit_api_only",
+}.get(mode, "streamlit_monetization")
 try:
-    from blog_keyword_analyzer.streamlit_api_only import main  # type: ignore  # noqa: E402
+    if target == "streamlit_monetization":
+        from blog_keyword_analyzer.streamlit_monetization import main  # type: ignore  # noqa: E402
+    elif target == "streamlit_platform":
+        from blog_keyword_analyzer.streamlit_platform import main  # type: ignore  # noqa: E402
+    else:
+        from blog_keyword_analyzer.streamlit_api_only import main  # type: ignore  # noqa: E402
 except Exception:
-    main = _load_app_main_via_spec()
+    main = _load_app_main_via_spec(target)
 
 if __name__ == "__main__":
     # Streamlit executes this file as a script; calling main starts the app
