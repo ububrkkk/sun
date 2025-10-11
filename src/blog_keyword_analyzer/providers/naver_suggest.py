@@ -27,11 +27,20 @@ class NaverSuggestProvider:
         try:
             items = data.get("items") if isinstance(data, dict) else None
             if isinstance(items, list):
-                for block in items:
-                    if isinstance(block, list) and len(block) >= 2 and isinstance(block[1], list):
-                        for s in block[1]:
-                            if isinstance(s, str):
+                # Primary shape: items[0] is a list of [suggestion, ...]
+                if items and isinstance(items[0], list):
+                    for entry in items[0]:
+                        if isinstance(entry, list) and entry:
+                            s = str(entry[0]).strip()
+                            if s:
                                 out.append(s)
+                # Fallback shape: iterate blocks and second element is list of strings
+                if not out:
+                    for block in items:
+                        if isinstance(block, list) and len(block) >= 2 and isinstance(block[1], list):
+                            for s in block[1]:
+                                if isinstance(s, str) and s:
+                                    out.append(s)
         except Exception:
             pass
         cleaned = [normalize_query(s) for s in out]

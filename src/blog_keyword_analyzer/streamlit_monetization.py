@@ -82,7 +82,7 @@ def main() -> None:
         ecpm = st.number_input("Display eCPM (KRW)", min_value=0, max_value=100_000, value=2500, step=100)
         aff_cvr = st.number_input("Affiliate CVR %", min_value=0.0, max_value=30.0, value=1.5, step=0.1)
         aff_comm = st.number_input("Affiliate commission (KRW)", min_value=0, max_value=1_000_000, value=1500, step=100)
-        min_monthly = st.number_input("Min monthly search", min_value=0, max_value=1_000_000, value=50, step=10)
+        min_monthly = st.number_input("Min monthly search", min_value=0, max_value=1_000_000, value=0, step=10)
         exclude = st.text_input("Exclude tokens (comma)", value="무료,쿠폰")
         top_n = st.number_input("Show Top N", min_value=10, max_value=500, value=100, step=10)
 
@@ -125,6 +125,8 @@ def main() -> None:
     has_monthly = any(((getattr(m, "naver_monthly_pc", 0) or 0) + (getattr(m, "naver_monthly_mobile", 0) or 0)) > 0 for m in metrics_map.values())
     if not has_monthly:
         st.info("No NAVER monthly metrics available. Set NAVER_AD_* keys for better estimates.")
+        # Avoid dropping all rows when monthly metrics are missing
+        min_monthly = 0
 
     params = MonetizationParams(
         capture_pct=float(capture),
