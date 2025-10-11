@@ -84,3 +84,22 @@ except Exception:
 if __name__ == "__main__":
     # Streamlit executes this file as a script; calling main starts the app
     main()
+    # Append a small build/mode banner in the sidebar for visibility
+    try:
+        import streamlit as st  # late import to avoid interfering with set_page_config in submodules
+        from datetime import datetime
+
+        commit = (
+            os.getenv("GIT_COMMIT")
+            or os.getenv("COMMIT_SHA")
+            or os.getenv("GITHUB_SHA")
+            or os.getenv("VERCEL_GIT_COMMIT_SHA")
+            or ""
+        )
+        commit_short = commit[:7] if commit else "local"
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+        st.sidebar.caption(
+            f"Build: {ts} | Mode: {mode} | UI: {target} | Commit: {commit_short}"
+        )
+    except Exception:
+        pass
