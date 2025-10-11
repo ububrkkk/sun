@@ -10,7 +10,7 @@ import os
 import sys
 import types
 import importlib.util
-from typing import Callable
+from typing import Callable, Optional
 
 
 def _src_dir() -> str:
@@ -50,7 +50,22 @@ def _load_app_main_via_spec(mod_basename: str) -> Callable[[], int | None]:
 
 _ensure_src_on_path()
 
-mode = os.getenv("APP_MODE", "monetization").strip().lower()
+def _cli_mode(argv: list[str]) -> Optional[str]:
+    try:
+        if "--mode" in argv:
+            i = argv.index("--mode")
+            if i + 1 < len(argv):
+                return argv[i + 1]
+        for a in argv:
+            if a.startswith("--mode="):
+                return a.split("=", 1)[1]
+    except Exception:
+        pass
+    return None
+
+mode = (_cli_mode(sys.argv) or os.getenv("APP_MODE", "monetization")).strip().lower()
+aliases = {"money": "monetization", "monetize": "monetization", "plat": "platform"}
+mode = aliases.get(mode, mode)
 target = {
     "monetization": "streamlit_monetization",
     "platform": "streamlit_platform",
